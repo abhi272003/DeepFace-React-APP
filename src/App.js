@@ -5,18 +5,18 @@ function App() {
   const faceDetector = process.env.REACT_APP_DETECTOR_BACKEND || "opencv";
   const distanceMetric = process.env.REACT_APP_DISTANCE_METRIC || "cosine";
 
-  const serviceEndpoint = "http://localhost:2003";
+  const serviceEndpoint = "http://localhost:5000";
   const antiSpoofing = process.env.REACT_APP_ANTI_SPOOFING === "1";
+  const [userImagePath,setuser] = useState([]);
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
-  
-  const [base64Image, setBase64Image] = useState('');
+
   const [isVerified, setIsVerified] = useState(null);
   const [identity, setIdentity] = useState(null);
   const [isAnalyzed, setIsAnalyzed] = useState(null);
   const [analysis, setAnalysis] = useState([]);
-  const [facialDb, setFacialDb] = useState({});
+  const [targetEmbedding, setTargetEmbedding] = useState('');
 
   useEffect(() => {
     const loadFacialDb = async () => {
@@ -26,22 +26,8 @@ function App() {
           envVarsWithPrefix[key.replace("REACT_APP_USER_", "")] = process.env[key];
         }
       }
-      return envVarsWithPrefix;
+      setuser(envVarsWithPrefix);
     };
-  
-    const fetchFacialDb = async () => {
-      try {
-        const loadedFacialDb = await loadFacialDb();
-        setFacialDb(loadedFacialDb);
-      } catch (error) {
-        console.error('Error loading facial database:', error);
-      }
-    };
-  
-    fetchFacialDb();
-  }, []);
-
-  useEffect(() => {
     const video = videoRef.current;
     if (video) {
       const getVideo = async () => {
@@ -54,6 +40,7 @@ function App() {
         }
       };
       getVideo();
+      loadFacialDb();
     }
   }, []);
 
@@ -71,7 +58,6 @@ function App() {
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
     const base64Img = canvas.toDataURL('image/jpg');
-    setBase64Image(base64Img);
 
     if (!base64Img) return;
 
@@ -84,42 +70,47 @@ function App() {
 
   const verify = async (base64Image) => {
     try {
-      for (const key in facialDb) {
-        const targetEmbedding = facialDb[key];
+      if (!targetEmbedding) {
+        console.error("Target embedding not set");
+        setIsVerified(false);
+        return;
+      }
 
-        const requestBody = JSON.stringify({
-          model_name: facialRecognitionModel,
-          detector_backend: faceDetector,
-          distance_metric: distanceMetric,
-          align: true,
-          img1_path: base64Image,
-          img2_path: targetEmbedding,
-          enforce_detection: false,
-          anti_spoofing: antiSpoofing,
-        });
+      const requestBody = JSON.stringify({
+        model_name: facialRecognitionModel,
+        detector_backend: faceDetector,
+        distance_metric: distanceMetric,
+        align: true,
+        img1_path: base64Image,
+        img2_path: targetEmbedding,
+        enforce_detection: false,
+        anti_spoofing: antiSpoofing,
+      });
 
-        const response = await fetch(`${serviceEndpoint}/verify`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: requestBody,
-        });
+      console.log("Request Body:", requestBody);  // Log the request body for debugging
 
-        const data = await response.json();
+      const response = await fetch(`${serviceEndpoint}/verify`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: requestBody,
+      });
 
-        if (response.status !== 200) {
-          console.log(data.error);
-          setIsVerified(false);
-          return;
-        }
+      const data = await response.json();
+      console.log("Response Data:", data);  // Log the response data for debugging
 
-        if (data.verified) {
-          setIsVerified(true);
-          setIsAnalyzed(false);
-          setIdentity(key);
-          return;
-        }
+      if (response.status !== 200) {
+        console.log(data.error);
+        setIsVerified(false);
+        return;
+      }
+
+      if (data.verified) {
+        setIsVerified(true);
+        setIsAnalyzed(false);
+        setIdentity("User");  // You can set it to a specific identity if needed
+        return;
       }
 
       setIsVerified(false);
@@ -154,8 +145,8 @@ function App() {
         return;
       }
 
-      const result = data.results.map(instance => 
-        `${instance.age} years old ${instance.dominant_race} ${instance.dominant_gender} with ${instance.dominant_emotion} mood.`
+      const result = data.results.map(instance =>
+        `${instance.age} years old ${instance.dominant_race} ${instance.dominant_gender} with ${instance.dominant_emotion} moode.`
       );
 
       if (result.length > 0) {
@@ -166,6 +157,32 @@ function App() {
     } catch (error) {
       console.error('Exception while analyzing image:', error);
     }
+  };
+
+  const loadTargetEmbedding = () => {
+    if (!userImagePath) {
+      console.error("User image path not provided in environment variables.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setTargetEmbedding(reader.result);
+    };
+    reader.onerror = (error) => {
+      console.error('Error reading image file:', error);
+    };
+
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/*';
+    fileInput.onchange = (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        reader.readAsDataURL(file);
+      }
+    };
+    fileInput.click();
   };
 
   return (
@@ -189,13 +206,14 @@ function App() {
         {isAnalyzed === true && <p style={{ color: 'green' }}>{analysis.join(", ")}</p>}
         <video ref={videoRef} style={{ width: '100%', maxWidth: '500px' }} />
         <br/><br/>
-        <button onClick={() => captureImage('verify')}>verify</button>
+        <button onClick={() => captureImage('verify')}>Verify</button>
         <button onClick={() => captureImage('analyze')}>Analyze</button>
         <br/><br/>
         <canvas ref={canvasRef} style={{ display: 'none' }} />
+        <br/>
+        <button onClick={loadTargetEmbedding}>Upload the Fi</button>
       </header>
     </div>
   );
 }
-
 export default App;
