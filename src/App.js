@@ -211,7 +211,7 @@ function App() {
         <br/><br/>
         <canvas ref={canvasRef} style={{ display: 'none' }} />
         <br/>
-        <button onClick={loadTargetEmbedding}>Upload the Fi</button>
+        <button onClick={loadTargetEmbedding}>Upload Image</button>
       </header>
     </div>
   );
